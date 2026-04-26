@@ -1,6 +1,5 @@
 package energy;
 
-import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
