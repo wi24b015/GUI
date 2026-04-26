@@ -10,15 +10,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Arrays;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 
 public class EnergyController {
 
     private static final String API_BASE_URL = "http://localhost:8080";
 
     private final HttpClient client = HttpClient.newHttpClient();
-    private final ObjectMapper mapper = new ObjectMapper();
 
     // Verbindung zu den Labels (fx:id)
     @FXML private Label lblPoolUsed;
@@ -35,7 +32,7 @@ public class EnergyController {
     public void onRefreshClick() {
         try {
             String json = sendGet(API_BASE_URL + "/energy/current");
-            CurrentEnergy current = mapper.readValue(json, CurrentEnergy.class);
+            CurrentEnergy current = parseCurrentEnergy(json);
 
             lblPoolUsed.setText(current.communityDepleted + "% used");
             lblGridPortion.setText(current.gridPortion + "%");
@@ -53,7 +50,7 @@ public class EnergyController {
             String end = dpEnd.getValue().toString();
 
             String json = sendGet(API_BASE_URL + "/energy/historical?start=" + start + "&end=" + end);
-            HistoricalEnergy[] values = mapper.readValue(json, HistoricalEnergy[].class);
+            HistoricalEnergy[] values = parseHistoricalEnergyArray(json);
 
             double produced = Arrays.stream(values)
                     .mapToDouble(value -> value.communityProduced)
@@ -88,6 +85,93 @@ public class EnergyController {
                 client.send(request, HttpResponse.BodyHandlers.ofString());
 
         return response.body();
+    }
+
+    private CurrentEnergy parseCurrentEnergy(String json) {
+        CurrentEnergy energy = new CurrentEnergy();
+        energy.hour = extractString(json, "hour");
+        energy.communityDepleted = extractDouble(json, "communityDepleted");
+        energy.gridPortion = extractDouble(json, "gridPortion");
+        return energy;
+    }
+
+    private HistoricalEnergy[] parseHistoricalEnergyArray(String json) {
+        String trimmed = json == null ? "" : json.trim();
+        if (trimmed.length() < 2 || "[]".equals(trimmed)) {
+            return new HistoricalEnergy[0];
+        }
+
+        String content = trimmed.substring(1, trimmed.length() - 1).trim();
+        if (content.isEmpty()) {
+            return new HistoricalEnergy[0];
+        }
+
+        String[] objects = content.split("\\},\\s*\\{");
+        HistoricalEnergy[] result = new HistoricalEnergy[objects.length];
+
+        for (int i = 0; i < objects.length; i++) {
+            String obj = objects[i];
+            if (!obj.startsWith("{")) {
+                obj = "{" + obj;
+            }
+            if (!obj.endsWith("}")) {
+                obj = obj + "}";
+            }
+
+            HistoricalEnergy energy = new HistoricalEnergy();
+            energy.hour = extractString(obj, "hour");
+            energy.communityProduced = extractDouble(obj, "communityProduced");
+            energy.communityUsed = extractDouble(obj, "communityUsed");
+            energy.gridUsed = extractDouble(obj, "gridUsed");
+            result[i] = energy;
+        }
+
+        return result;
+    }
+
+    private String extractString(String json, String key) {
+        String marker = "\"" + key + "\"";
+        int keyIndex = json.indexOf(marker);
+        if (keyIndex < 0) return "";
+
+        int colonIndex = json.indexOf(':', keyIndex + marker.length());
+        if (colonIndex < 0) return "";
+
+        int startQuote = json.indexOf('"', colonIndex + 1);
+        if (startQuote < 0) return "";
+
+        int endQuote = json.indexOf('"', startQuote + 1);
+        if (endQuote < 0) return "";
+
+        return json.substring(startQuote + 1, endQuote);
+    }
+
+    private double extractDouble(String json, String key) {
+        String marker = "\"" + key + "\"";
+        int keyIndex = json.indexOf(marker);
+        if (keyIndex < 0) return 0.0;
+
+        int colonIndex = json.indexOf(':', keyIndex + marker.length());
+        if (colonIndex < 0) return 0.0;
+
+        int i = colonIndex + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+
+        int start = i;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E') {
+                i++;
+            } else {
+                break;
+            }
+        }
+
+        if (start == i) return 0.0;
+
+        return Double.parseDouble(json.substring(start, i));
     }
 
     public static class CurrentEnergy {
